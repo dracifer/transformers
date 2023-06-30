@@ -2698,6 +2698,9 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             init_contexts.append(init_empty_weights())
 
         with ContextManagers(init_contexts):
+            print(f"{config=}")
+            print(f"{model_args=}")
+            print(f"{model_kwargs=}")
             model = cls(config, *model_args, **model_kwargs)
 
         # Check first if we are `from_pt`
