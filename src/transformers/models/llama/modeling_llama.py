@@ -89,25 +89,32 @@ class LlamaRMSNorm(nn.Module):
 
 
 class LlamaRotaryEmbedding(torch.nn.Module):
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
-        super().__init__()
+    # training: max_position_embeddings = 2048 and scale_factor = 1 
+    # finetuning: max_position_embeddings = 2048 and 
+    # scale_factor = max_position_embeddings_high (e.g. 32K) / max_position_embeddings_low (e.g. 2048)
+    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, scale_factor=1):
+        super().__init__()        
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float().to(device) / dim))
         self.register_buffer("inv_freq", inv_freq)
+        self.scale_factor = scale_factor
 
         # Build here to make `torch.jit.trace` work.
-        self.max_seq_len_cached = max_position_embeddings
+        self.max_seq_len_cached = max_position_embeddings * self.scale_factor
         t = torch.arange(self.max_seq_len_cached, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
+        t /= self.scale_factor
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
         dtype = torch.get_default_dtype()
         self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
+        
 
     def forward(self, x, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
         # This `if` block is unlikely to be run after we build sin/cos in `__init__`. Keep the logic here just in case.
         if seq_len > self.max_seq_len_cached:
+            assert self.scale_factor == 1
             self.max_seq_len_cached = seq_len
             t = torch.arange(self.max_seq_len_cached, device=x.device, dtype=self.inv_freq.dtype)
             freqs = torch.einsum("i,j->ij", t, self.inv_freq)
@@ -166,6 +173,7 @@ class LlamaAttention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
         self.max_position_embeddings = config.max_position_embeddings
+        self.max_position_embeddings_scale_factor = config.max_position_embeddings_scale_factor
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -176,7 +184,11 @@ class LlamaAttention(nn.Module):
         self.k_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
-        self.rotary_emb = LlamaRotaryEmbedding(self.head_dim, max_position_embeddings=self.max_position_embeddings)
+        self.rotary_emb = LlamaRotaryEmbedding(
+            self.head_dim, 
+            max_position_embeddings=self.max_position_embeddings,
+            scale_factor=self.max_position_embeddings_scale_factor,
+        )
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -359,6 +371,10 @@ class LlamaPreTrainedModel(PreTrainedModel):
     def _set_gradient_checkpointing(self, module, value=False):
         if isinstance(module, LlamaModel):
             module.gradient_checkpointing = value
+            
+    def resize_position_embedding_scale_factor(self, scale_factor: float):
+        self.config.max_position_embeddings_scale_factor = scale_factor
+        
 
 
 LLAMA_INPUTS_DOCSTRING = r"""
@@ -614,6 +630,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
+        print(f"BWEN: {__file__}:LlamaForCausalLM:{config.max_position_embeddings_scale_factor}")
         self.model = LlamaModel(config)
 
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)

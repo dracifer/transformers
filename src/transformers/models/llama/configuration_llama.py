@@ -64,6 +64,13 @@ class LlamaConfig(PretrainedConfig):
             relevant if `config.is_decoder=True`.
         tie_word_embeddings(`bool`, *optional*, defaults to `False`):
             Whether to tie weight embeddings
+            
+        # BWEN modification
+        max_position_embeddings_scale_factor (`float`, *optional*, defaults to 1):
+            The parameter to enable interploation to enable large context window in finetuning. 
+            [1] https://kaiokendev.github.io/til#extending-context-to-8k
+            [2] https://arxiv.org/pdf/2306.15595.pdf
+                 
         Example:
 
     ```python
@@ -97,10 +104,12 @@ class LlamaConfig(PretrainedConfig):
         bos_token_id=1,
         eos_token_id=2,
         tie_word_embeddings=False,
+        max_position_embeddings_scale_factor=1,
         **kwargs,
     ):
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
+        self.max_position_embeddings_scale_factor = max_position_embeddings_scale_factor
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size
         self.num_hidden_layers = num_hidden_layers
