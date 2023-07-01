@@ -351,8 +351,6 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
         ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
-    
-    # print(f"BWEN: model type: {type(model)}")
 
     # freeze the convolutional waveform encoder
     if model_args.freeze_feature_encoder:
